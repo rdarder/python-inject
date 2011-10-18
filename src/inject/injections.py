@@ -241,27 +241,27 @@ class ParamInjection(object):
         description.
     
     '''
-    
-    def __new__(cls, name, type=None, none=False):
+
+    def __init__(self, name, type=None, none=False):
         '''Create a decorator injection for a param.'''
+        self.name = name
         if type is None:
             type = name
         
-        injection = InjectionPoint(type, none)
-        
-        def decorator(func):
-            if getattr(func, 'injection_wrapper', False):
-                # It is already a wrapper.
-                wrapper = func
-            else:
-                wrapper = cls.create_wrapper(func)
-            cls.add_injection(wrapper, name, injection)
-            return wrapper
-        
-        return decorator
-    
-    @classmethod
-    def create_wrapper(cls, func):
+        self.injection = InjectionPoint(type, none)
+
+    def __call__(self, func):
+        if getattr(func, 'injection_wrapper', False):
+            # It is already a wrapper.
+            wrapper = func
+        else:
+            wrapper = self.create_wrapper(func)
+
+        self.add_injection(wrapper, self.name, self.injection)
+        return wrapper
+
+    @staticmethod
+    def create_wrapper(func):
         injections = {}
         
         def injection_wrapper(*args, **kwargs):
@@ -288,8 +288,8 @@ class ParamInjection(object):
         
         return injection_wrapper
     
-    @classmethod
-    def add_injection(cls, wrapper, name, injection):
+    @staticmethod
+    def add_injection(wrapper, name, injection):
         func = wrapper.func
         func_code = func.func_code
         flags = func_code.co_flags
