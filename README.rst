@@ -27,6 +27,10 @@ Key features
     def myfunc(param):
         pass
 
+    @inject.annotated
+    def myfunc(a: A, b: B):
+        pass
+
 - Normal way of instantiating objects, ``Class(*args, **kwargs)``.
 - Autobinding.
 - Application, thread and request scopes.

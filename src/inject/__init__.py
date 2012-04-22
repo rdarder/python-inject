@@ -138,7 +138,7 @@ __version__ = '2.0-beta'
 
 from inject import exc
 from inject.injections import attr, named_attr, class_attr, param, \
-    super_param as super
+    super_param as super, annotated, Tagged
 from inject.imports import lazy
 from inject.injectors import Injector, get_injector, get_instance, \
     create, create_lazy, register, unregister, is_registered

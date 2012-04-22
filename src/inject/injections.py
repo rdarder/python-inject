@@ -98,8 +98,9 @@ Example::
     my_func()
 
 '''
-from functools import update_wrapper
+import inspect
 import collections
+from functools import update_wrapper, partial
 
 from inject.exc import NoParamError
 from inject.injectors import get_instance as _get_instance
@@ -306,6 +307,125 @@ class ParamInjection(object):
 
         wrapper.injections[name] = injection
 
+
+
+class AnnotatedParametersInjection(object):
+
+    base_exclude_types = {bool, int, float, complex,
+                          bytes, bytearray, dict, list, tuple, range,
+                          set, frozenset, str}
+    def __init__(self, func:collections.Callable, exclude:list):
+        self.injection_points = {}
+        self.exclude_names = set()
+        self.exclude_types = set(self.base_exclude_types)
+        self.exclude_tags = set()
+        self.func = func
+        if not isinstance(exclude, collections.Iterable):
+            exclude = [exclude]
+        elif isinstance(exclude, str):
+            exclude = exclude.split()
+        elif isinstance(exclude, Tagged):
+            exclude = [exclude]
+
+        for e in exclude:
+            if isinstance(e, type):
+                self.exclude_types.add(e)
+            elif isinstance(e, str):
+                self.exclude_names.add(e)
+            elif isinstance(e, Tagged):
+                self.exclude_tags.add(e)
+            else:
+                raise ValueError("Invalid exclude: '{0}'", e)
+        self.build_args_spec()
+        self.build_injection_points()
+    def build_args_spec(self):
+        """get args spec from func, and calculate other needed values for faster __call__"""
+        spec = inspect.getfullargspec(self.func)
+        defaults = spec.defaults or tuple()
+        kwonlydefaults = spec.kwonlydefaults or tuple()
+        self.args_limit = len(defaults) or None
+        self.arg_spec = inspect.FullArgSpec(spec.args, spec.varargs,
+                                                spec.varkw, defaults,
+                                                spec.kwonlyargs, kwonlydefaults,
+                                                spec.annotations)
+
+
+
+    def build_injection_points(self):
+        spec = self.arg_spec
+        for name in spec.args + spec.kwonlyargs:
+            #XXX should only build them for args with no defaults
+            if name in self.exclude_names:
+                continue
+            tag= spec.annotations.get(name)
+            if tag is None:
+                continue
+            elif isinstance(tag, type):
+                if tag in self.exclude_types:
+                    continue
+                else:
+                    self.injection_points[name] = InjectionPoint(tag)
+            elif isinstance(tag, Tagged):
+                if tag in self.exclude_tags:
+                    continue
+                else:
+                    self.injection_points[name] = InjectionPoint(tag)
+
+    def __call__(self, *args, **kwargs):
+        spec = self.arg_spec
+        injections = self.injection_points
+        args_len = len(args)
+        if len(spec.args) - len(spec.defaults) > args_len:
+            args = list(args)
+            for name in spec.args[args_len:self.args_limit]:
+                if name in kwargs:
+                    args.append(kwargs.pop(name))
+                elif name in injections:
+                    args.append(injections[name].get_instance())
+                else:
+                    raise TypeError(str.format(
+                        "Parameter '{}' not provided nor injected", name
+                    ))
+        for name in spec.kwonlyargs:
+            if name in kwargs or name in spec.kwonlydefaults:
+                continue
+            elif name in injections:
+                kwargs[name] = injections[name].get_instance()
+            else:
+                raise TypeError(str.format(
+                    "Parameter '{}' not provided nor injected", name
+                ))
+        return self.func(*args, **kwargs)
+
+    def __get__(self, instance, owner):
+        """behave as a descriptor for instance methods compatibility.
+        """
+        if instance is None:
+            return self
+        else:
+            return partial(self, instance)
+
+
+Tagged = collections.namedtuple('Tagged', ('type', 'tag'))
+
+def annotated(func:collections.Callable=None, *, exclude:tuple=()):
+    """Function decorator that registers annotated parameters for injection.
+    exclude is a list containing names, types or tags, which won't get injected
+    Example::
+
+        class A(object):
+            pass
+
+        class C(object):
+            @inject.annotated
+            def __init__(self, a:A, another:Tagged(int, 'config.total')):
+                self.a = a
+                self.another = another
+    """
+    if func is not None:
+        return AnnotatedParametersInjection(func, exclude)
+    else:
+        return lambda func: AnnotatedParametersInjection(func, exclude)
 
 attr = AttributeInjection
 named_attr = NamedAttributeInjection

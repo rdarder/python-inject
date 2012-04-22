@@ -2,7 +2,7 @@ import unittest
 
 from inject.injections import InjectionPoint, AttributeInjection, \
     ParamInjection, NoParamError, NamedAttributeInjection, \
-    ClassAttributeInjection
+    ClassAttributeInjection, annotated, Tagged
 from inject.injectors import Injector
 
 
@@ -274,3 +274,152 @@ class ParamTestCase(unittest.TestCase):
         wrapper = ParamInjection.create_wrapper(func3)
         ParamInjection.add_injection(wrapper, 'kwarg', 'inj')
         self.assertEqual(wrapper.injections['kwarg'], 'inj')
+
+
+class AnnotatedInjection(unittest.TestCase):
+    def setUp(self):
+        self.injector = Injector()
+        self.injector.register()
+
+    def tearDown(self):
+        self.injector.unregister()
+
+    def scenario1(self):
+        """basic scenario used by most annotation tests"""
+
+        class A(object): pass
+
+        class B(object): pass
+
+        a = A()
+        b = B()
+        self.injector.bind(A, a)
+        self.injector.bind(B, b)
+        return A, a, B, b
+
+    def testInjection(self):
+        """ Basic function injection, two parameters, by type
+        """
+        A, a, B, b = self.scenario1()
+
+        @annotated
+        def func(a:A, b:B) -> (A, B):
+            return a, b
+
+        a2, b2 = func()
+        self.assertEqual(a2, a)
+        self.assertEqual(b2, b)
+
+    def testMethodInjection(self):
+        """test injection for methods"""
+        A, a, B, b = self.scenario1()
+
+        class SomeClass(object):
+            @annotated
+            def meth(self, a:A, b:B) -> (A, B):
+                return a, b
+
+            @classmethod
+            @annotated
+            def cls_meth(cls, a:A, b:B) -> (A, B):
+                return a, b
+
+            @staticmethod
+            @annotated
+            def static_meth(a:A, b:B) -> (A, B):
+                return a, b
+
+        s = SomeClass()
+        #call instance method
+        a2, b2 = s.meth()
+        self.assertEqual(a2, a)
+        self.assertEqual(b2, b)
+
+        #call instance method from class attribute
+        a2, b2 = SomeClass.meth(s)
+        self.assertEqual(a2, a)
+        self.assertEqual(b2, b)
+
+        #call classmethod
+        a2, b2 = s.cls_meth()
+        self.assertEqual(a2, a)
+        self.assertEqual(b2, b)
+
+        #call static method
+        a2, b2 = s.static_meth()
+        self.assertEqual(a2, a)
+        self.assertEqual(b2, b)
+
+
+    def testExcludeNameInjection(self):
+        """exclude injection from parameter name"""
+        A, a, B, b = self.scenario1()
+
+        @annotated(exclude='param_a')
+        def func(param_a:A, param_b:B) -> (A, B):
+            return param_a, param_b
+
+        self.assertRaises(TypeError, func)
+        a2, b2 = func(a)
+        self.assertEqual(a2, a)
+        self.assertEqual(b2, b)
+        a2, b2 = func(param_a=a)
+        self.assertEqual(a2, a)
+        self.assertEqual(b2, b)
+
+    def testExcludeTypeInjection(self):
+        """Exclude injection by parameter type"""
+        A, a, B, b = self.scenario1()
+
+        @annotated(exclude=A)
+        def func(param_a:A, param_b:B) -> (A, B):
+            return param_a, param_b
+
+        self.assertRaises(TypeError, func)
+        a2, b2 = func(a)
+        self.assertEqual(a2, a)
+        self.assertEqual(b2, b)
+        a2, b2 = func(param_a=a)
+        self.assertEqual(a2, a)
+        self.assertEqual(b2, b)
+
+    def testExcludeTagInjection(self):
+        """Exclude injection by tagged type"""
+        class A(object): pass
+
+        class B(object): pass
+
+        a1 = A()
+        a2 = A()
+        b = B()
+        self.injector.bind(Tagged(A, 'first'), a1)
+        self.injector.bind(Tagged(A, 'second'), a2)
+        self.injector.bind(B, b)
+
+        @annotated(exclude=Tagged(A, 'second'))
+        def func(first_a:Tagged(A, 'first'),
+                 second_a:Tagged(A, 'second'),
+                 b:B) -> (A, A, B):
+            return first_a, second_a, b
+
+        self.assertRaises(TypeError, func)
+        first_a2, second_a2, b2 = func(second_a=a2)
+        self.assertEqual(first_a2, a1)
+        self.assertEqual(second_a2, a2)
+        self.assertEqual(b2, b)
+
+    def testKwOnlyInjection(self):
+        """Kw only function injection"""
+
+        A, a, B, b = self.scenario1()
+
+        @annotated(exclude=A)
+        def func(*, param_a:A, param_b:B) -> (A, B):
+            return param_a, param_b
+
+        self.assertRaises(TypeError, func)
+        self.assertRaises(TypeError, func, a)
+        a2, b2 = func(param_a=a)
+        self.assertEqual(a2, a)
+        self.assertEqual(b2, b)
+
