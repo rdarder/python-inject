@@ -30,29 +30,3 @@ class WsgiInjectMiddleware(object):
                 yield s
         finally:
             scope.end()
-
-
-class DjangoInjectMiddleware(object):
-    
-    '''Django inject middleware registers a request scope for each request,
-    and unregisters it for a response.
-    
-    It is recommended to put it before any other middleware. Otherwise, it is
-    possible that you will use injection in another middleware when the request
-    scope has been already unregistered.
-    '''
-    
-    scope = inject.class_attr(inject.scopes.RequestScope)
-    
-    def process_request(self, request):
-        '''Register a request scope for a request.'''
-        from django.http import HttpRequest
-        
-        scope = self.scope
-        scope.start()
-        scope.bind(HttpRequest, request)
-    
-    def process_response(self, request, response):
-        '''Unregister a request scope.'''
-        self.scope.end()
-        return response
