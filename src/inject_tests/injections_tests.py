@@ -2,7 +2,7 @@ import unittest
 
 from inject.injections import InjectionPoint, AttributeInjection, \
     ParamInjection, NoParamError, NamedAttributeInjection, \
-    ClassAttributeInjection, annotated, Tagged
+    ClassAttributeInjection, annotated, Tagged, identify
 from inject.injectors import Injector
 
 
@@ -407,6 +407,24 @@ class AnnotatedInjection(unittest.TestCase):
         self.assertEqual(first_a2, a1)
         self.assertEqual(second_a2, a2)
         self.assertEqual(b2, b)
+
+    def testTaggedInjection(self):
+        """Tagged annotations hint injections"""
+        class A(object): pass
+
+        a1 = A()
+        a2 = A()
+        self.injector.bind(Tagged(A, 'first'), a1)
+        self.injector.bind(Tagged(A, 'second'), a2)
+
+        @annotated
+        @identify(param_a2="second")
+        def func(param_a1: Tagged(A, 'first'), param_a2: A):
+            return param_a1, param_a2
+
+        r1, r2 = func()
+        self.assertEqual(r1, a1)
+        self.assertEqual(r2, a2)
 
     def testKwOnlyInjection(self):
         """Kw only function injection"""

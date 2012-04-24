@@ -427,6 +427,33 @@ def annotated(func:collections.Callable=None, *, exclude:tuple=()):
     else:
         return lambda func: AnnotatedParametersInjection(func, exclude)
 
+def identify(**tags):
+    """modify function annotations, adding a identifying string to selected
+    parameters. Example
+    @inject.identify(a="first")
+    def f(a: int, b: int) -> int:
+        return a + b
+
+    #would be equivalent to:
+
+    def f(a: inject.Tagged(int, "first"), b: int) -> int:
+        return a + b
+    """
+    def wrapper(func: collections.Callable) -> collections.Callable:
+        spec = inspect.getfullargspec(func)
+        for param, tag in tags.items():
+            if param not in spec.annotations:
+                raise TypeError("Wrong parameter '{}'".format(param))
+            else:
+                type_ = spec.annotations[param]
+                spec.annotations[param] = Tagged(type_, tag)
+        return func
+    return wrapper
+
+
+
+
+
 attr = AttributeInjection
 named_attr = NamedAttributeInjection
 class_attr = ClassAttributeInjection
