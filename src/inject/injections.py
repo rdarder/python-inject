@@ -1,5 +1,6 @@
 '''Injections fetch bindings from an injector.
-L{inject.attr <AttributeInjection>}, L{inject.named_attr <NamedAttributeInjection>}
+L{inject.attr <AttributeInjection>}, L{inject.named_attr
+<NamedAttributeInjection>}
 and L{inject.class_attr <ClassAttributeInjection>} are descriptors which can
 be used inside classes, while L{inject.param <ParamInjection>} is a function
 decorator.
@@ -98,7 +99,8 @@ Example::
     my_func()
 
 '''
-from functools import update_wrapper
+from functools import update_wrapper, partial
+import inspect
 
 from inject.exc import NoParamError
 from inject.injectors import get_instance as _get_instance
@@ -113,22 +115,20 @@ super_param = object()
 
 
 class InjectionPoint(object):
-    
     '''InjectionPoint serves injection requests.'''
-    
+
     __slots__ = ('type', 'none')
-    
+
     def __init__(self, type, none=False):
         self.type = type
         self.none = none
-    
+
     def get_instance(self):
         '''Return an instance for the injection point type.'''
         return _get_instance(self.type, none=self.none)
 
 
 class AttributeInjection(object):
-    
     '''AttributeInjection is a descriptor, which injects an instance into
     an attribute.
     
@@ -144,24 +144,24 @@ class AttributeInjection(object):
         description.
     
     '''
-    
+
     def __init__(self, type, none=False):
         '''Create an injection for an attribute.'''
         self.attr = None
         self.injection = InjectionPoint(type, none)
-    
+
     def __get__(self, instance, owner):
         if instance is None:
             return self
-        
+
         attr = self.attr
         if attr is None:
             attr = self._get_set_attr(owner)
-        
+
         obj = self.injection.get_instance()
         setattr(instance, attr, obj)
         return obj
-    
+
     def _get_set_attr(self, owner):
         attr = get_attrname_by_value(owner, self)
         self.attr = attr
@@ -169,7 +169,6 @@ class AttributeInjection(object):
 
 
 class NamedAttributeInjection(AttributeInjection):
-    
     '''NamedAttributeInjection is a descriptor, which injects a dependency into
     a specified instance attribute.
     
@@ -185,7 +184,7 @@ class NamedAttributeInjection(AttributeInjection):
         description.
     
     '''
-    
+
     def __init__(self, attr, type, none=False):
         '''Create an injection for an attribute.'''
         super(NamedAttributeInjection, self).__init__(type, none)
@@ -193,7 +192,6 @@ class NamedAttributeInjection(AttributeInjection):
 
 
 class ClassAttributeInjection(object):
-    
     '''ClassAttributeInjection is a class descriptor, which resolves
     a dependency every time it is accessed.
     
@@ -203,110 +201,179 @@ class ClassAttributeInjection(object):
         description.
     
     '''
-    
+
     point_class = InjectionPoint
-    
+
     def __init__(self, type, none=False):
         self.injection = InjectionPoint(type, none)
-    
+
     def __get__(self, instance, owner):
         return self.injection.get_instance()
 
 
 class ParamInjection(object):
-    
     '''ParamInjection is a function decorator, which injects the required
     non-given params directly into a function, passing them as keyword args.
-    
+
     B{Alias}: C{param}
-    
+
     Set an argument to C{super_param} to indicate that it is injected in
     a super class.
-    
+
     Example::
-        
+
         class A(object): pass
         class B(object):
             @param('a', A)
             def __init__(self, a):
                 self.a = a
-        
+
         class C(B):
             @param('a2', A):
             def __init__(self, a2, a=super_param):
                 super(C, self).__init__(a)
                 self.a2 = a2
-    
+
     @see: L{inject.injections} for injections comparisons and detailed
         description.
-    
-    '''
-    
-    def __new__(cls, name, type=None, none=False):
-        '''Create a decorator injection for a param.'''
-        if type is None:
-            type = name
-        
-        injection = InjectionPoint(type, none)
-        
-        def decorator(func):
-            if getattr(func, 'injection_wrapper', False):
-                # It is already a wrapper.
-                wrapper = func
-            else:
-                wrapper = cls.create_wrapper(func)
-            cls.add_injection(wrapper, name, injection)
-            return wrapper
-        
-        return decorator
-    
-    @classmethod
-    def create_wrapper(cls, func):
-        injections = {}
-        
-        def injection_wrapper(*args, **kwargs):
-            '''InjectionPoint wrapper gets non-existent keyword arguments
-            from injections, combines them with kwargs, and passes to
-            the wrapped function.
-            '''
-            for name in injections:
-                if name in kwargs and kwargs[name] is not super_param:
-                    continue
-                
-                injection = injections[name]
-                kwargs[name] = injection.get_instance()
-            
-            return func(*args, **kwargs)
-        
-        # Store the attributes in a wrapper for other functions.
-        # Inside the wrapper access them from the closure.
-        # It is about 10% faster.
-        injection_wrapper.func = func
-        injection_wrapper.injections = injections
-        injection_wrapper.injection_wrapper = True
-        update_wrapper(injection_wrapper, func)
-        
-        return injection_wrapper
-    
-    @classmethod
-    def add_injection(cls, wrapper, name, injection):
-        func = wrapper.func
-        func_code = func.func_code
-        flags = func_code.co_flags
-        
-        if not flags & 0x04 and not flags & 0x08:
-            # 0x04 func uses args
-            # 0x08 func uses kwargs
-            varnames = func_code.co_varnames
-            if name not in varnames:
-                raise NoParamError(
-                    '%s does not accept an injected param "%s".' % 
-                    (func, name))
-        
-        wrapper.injections[name] = injection
 
+    '''
+
+    def __init__(self, name, type=None, none=False):
+        if type is None:
+                type = name
+
+        self.name = name
+        self.injection = InjectionPoint(type, none)
+
+    def __call__(self, func):
+        """Decorate func, adding the InjectionPoint to a wrapper around the
+        original function. Avoids double wrapping."""
+        wrapper = getInjectionWrapper(func)
+        wrapper.add_param_injection(self.name, self.injection)
+        return wrapper
+
+
+class DecoratorInjection(object):
+    '''DecoratorInjection is a function decorator,
+    which injects a decorator to be resolved when the function is called.
+    It's useful when a decorator needs to be built first,
+    but its dependencies are not ready on import time
+
+    B{Alias}: C{decorator}
+
+    Example::
+
+        class SomeDep(object):
+            def action(self):
+                print('some action')
+
+        class SomeDeco(object):
+            @param('some_dep', SomeDep)
+            def __init__(self, some_dep):
+                self.some_dep = some_dep
+            def __call__(self, func):
+                def wrapper(*args, **kwargs):
+                    some_dep.action()
+                    return func(*args, **kwargs)
+                return wrapper
+
+        class B(object):
+            @decorator(SomeDeco),
+            def __init__(self, a):
+                self.a = a
+
+    @see: L{inject.injections} for injections comparisons and detailed
+        description.
+
+    '''
+    def __init__(self, type, none=False, *args, **kwargs):
+        self.deco_injection = (InjectionPoint(type, none), args, kwargs)
+
+    def __call__(self, func):
+        wrapper = getInjectionWrapper(func)
+        wrapper.add_decorator_injection(self.deco_injection)
+        return wrapper
+
+
+def getInjectionWrapper(func):
+    if isinstance(func, InjectionWrapper):
+        return func
+    elif isinstance(func, classmethod):
+        return ClassMethodInjectionWrapper(func)
+    elif isinstance(func, staticmethod):
+        return StaticMethodInjectionWrapper(func)
+    else:
+        return InjectionWrapper(func)
+
+class InjectionWrapper(object):
+    '''InjectionWrapper gets non-existent keyword arguments
+    from injections, combines them with kwargs, and passes to
+    the wrapped function.
+    '''
+
+    def __init__(self, func):
+        self.param_injections = {}
+        self.decorator_injections = []
+        self.init_func(func)
+
+
+    def init_func(self, func):
+        self.func = func
+        self.signature = inspect.getargspec(func)
+        update_wrapper(self, func, updated=())
+
+    def __get__(self, instance, owner):
+        """Default descriptor implementation suitable for instance methods"""
+        if instance is None:
+            return self
+        else:
+            return partial(self, instance)
+
+    def __call__(self, *args, **kwargs):
+        """ Resolve decorator and parameter injections before calling the
+        target callable
+        """
+        func = self.func
+        for deco_injection, dargs, dkwargs in self.decorator_injections:
+            deco = deco_injection.get_instance()
+            func = deco(func, *dargs, **dkwargs)
+        for name, injection in self.param_injections.items():
+            if name not in kwargs or kwargs[name] is super_param:
+                kwargs[name] = injection.get_instance()
+
+        return func(*args, **kwargs)
+
+    def add_param_injection(self, name, injection):
+        sig = self.signature
+        if sig.keywords or sig.varargs or name in sig.args:
+            self.param_injections[name] = injection
+        else:
+            raise NoParamError(
+                '{} does not accept an injected param "{}".'.format(self.func,
+                                                                    name))
+
+    def add_decorator_injection(self, decorator_injection):
+        self.decorator_injections.append(decorator_injection)
+
+class ExternalWrappedMethod(InjectionWrapper):
+    def init_func(self, func):
+        self.func = realfunc = func.__func__
+        self.__name__ = realfunc.__name__
+        self.__doc__ = realfunc.__doc__
+        self.signature = inspect.getargspec(realfunc)
+
+class ClassMethodInjectionWrapper(ExternalWrappedMethod):
+    def __get__(self, instance, owner):
+        return partial(self, owner)
+
+
+class StaticMethodInjectionWrapper(ExternalWrappedMethod):
+    def __get__(self, instance, owner):
+        return self
 
 attr = AttributeInjection
 named_attr = NamedAttributeInjection
 class_attr = ClassAttributeInjection
 param = ParamInjection
+decorator = DecoratorInjection

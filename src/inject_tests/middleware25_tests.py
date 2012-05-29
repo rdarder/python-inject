@@ -68,7 +68,7 @@ class DjangoTestCase(unittest.TestCase):
         m.process_request(request)        
         m.process_response(request, None)
         
-        raise AssertionError()
+        #raise AssertionError()
     
     def test_response(self):
         '''Test Django middleware response.'''
