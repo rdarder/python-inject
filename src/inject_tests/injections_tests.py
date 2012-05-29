@@ -365,3 +365,25 @@ class DecoratorTestCase(unittest.TestCase):
         self.assertEqual(t.class_method2(10), (Target,10))
         self.assertEqual(t.static_method(10), 10)
         self.assertEqual(t.static_method2(10), 10)
+
+class MultiBindingTestCase(unittest.TestCase):
+
+    def setUp(self):
+        self.injector = Injector()
+        self.injector.register()
+
+    def tearDown(self):
+        self.injector.unregister()
+
+    def testMultiInjection(self):
+        '''MultiInjection should inject a MultiBinding(set) of dependencies'''
+        @ParamInjection('numbers', 'num')
+        def func(numbers):
+            return sum(numbers)
+
+        self.injector.add_binding('num', 10)
+        self.injector.add_binding('num', 11)
+        self.injector.add_binding('num', 12)
+
+        self.assertEqual(func(), 33)
+

@@ -121,7 +121,10 @@ class Injector(object):
             self.unbind(type)
         
         self._app_scope.bind(type, to)
-    
+
+    def add_binding(self, type, to=None):
+        self._app_scope.add_binding(type, to)
+
     def unbind(self, type):
         '''Unbind the first occurrence of a type in any scope.'''
         for scope in self._scopes_stack:
@@ -176,7 +179,10 @@ class Injector(object):
             self.unbind_factory(type)
         
         self._app_scope.bind_factory(type, factory)
-    
+
+    def add_factory(self, type, factory):
+        self._app_scope.add_factory(type, factory)
+
     def unbind_factory(self, type):
         '''Unbind the first occurrence of a type factory in any scope.'''
         for scope in self._scopes_stack:

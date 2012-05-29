@@ -94,7 +94,36 @@ class AbstractScope(object):
     def is_factory_bound(self, type):
         '''Return true if there is a bound factory for a given type.'''
         return type in self._factories
-    
+
+    def add_binding(self, type, to):
+        if self.is_bound(type):
+            bindings = self._bindings.get(type)
+            if not isinstance(bindings, MultiBinding):
+                raise TypeError("Cannot add_binding to type '{}', "
+                                "bound to {} ".format(type, bindings))
+        else:
+            bindings = MultiBinding()
+            self._bindings[type] = bindings
+
+        bindings.add(to)
+        self.logger.info('Added binding for %r to %r.', type, to)
+
+    def add_factory(self, type, factory):
+        if not callable(factory):
+            raise FactoryNotCallable(factory)
+
+        if self.is_factory_bound(type):
+            factories = self._factories.get(type)
+            if not isinstance(factories, MultiFactory):
+                raise TypeError("Cannot add_binding to type '{}', "
+                                "bound to factory {} ".format(type, factories))
+        else:
+            factories = MultiFactory()
+
+        factories.add(factory)
+        self.logger.info('Added factory binding for %r to %r.', type, factory)
+
+
     def get(self, type):
         '''Return a bound object for a given type, or instantiate and bind
         it using a factory if it is present, or return None.
@@ -107,6 +136,17 @@ class AbstractScope(object):
             inst = factory()
             self.bind(type, inst)
             return inst
+
+
+class MultiBinding(set):
+    pass
+
+class MultiFactory(set):
+    def __init__(self, factories=None):
+        if factories is not None:
+            self.update(factories)
+    def __call__(self):
+        return MultiBinding(factory() for factory in self)
 
 
 class NoScope(AbstractScope):
